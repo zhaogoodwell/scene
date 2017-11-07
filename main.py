@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import time
 import os
 from scencedataset import Exampler
-
+import torch.nn.functional as F
 use_gpu = torch.cuda.is_available()
 
 
@@ -47,6 +47,19 @@ valset   = Exampler(label_path = val_label_path, image_path =val_image_path,tran
 valloader   = torch.utils.data.DataLoader(valset,batch_size=batch_size,shuffle=False,num_workers=32)
 dataloder ={'train':trainloader,'val':valloader}
 dataset_sizes ={'train':len(trainset),'val':len(valset)}
+
+class Net(nn.Module):
+    def __init__(self,num_class):
+        super(Net,self).__init__()
+        self.net = models.resnet152(pretrained=True)
+        self.liner = nn.Linear(1000, num_class)
+    def forward(self,x,drop_rate):
+        x = self.net(x)
+        x = F.relu(x)
+        x = F.dropout(x,drop_rate)
+        x = self.liner(x)
+        return x
+
 
 def train_model(model,dataloders,scriterion, optimizer, scheduler, num_epochs=25):
     since = time.time()
@@ -88,7 +101,11 @@ def train_model(model,dataloders,scriterion, optimizer, scheduler, num_epochs=25
                 optimizer.zero_grad()
 
                 # forward
-                outputs = model(inputs)
+                if phase == 'train':
+                    outputs = model(inputs,0.5)
+                if phase == 'val':
+                    outputs = model(inputs,0.0)
+                    
                 _, preds = torch.max(outputs.data, 1)
                 loss = criterion(outputs, labels)
 
@@ -125,14 +142,12 @@ def train_model(model,dataloders,scriterion, optimizer, scheduler, num_epochs=25
     model.load_state_dict(best_model_wts)
     return model
 
-model_ft = models.resnet152(pretrained=True)
-num_ftrs = model_ft.fc.in_features
-model_ft.fc = nn.Linear(num_ftrs, 80)
-model_ft = torch.nn.DataParallel(model_ft,device_ids=[0, 1, 2,3,4,5])
-
+model_ft = Net(num_class=80)
+model_ft = torch.nn.DataParallel(model_ft,device_ids=[0,1, 2,3,4,5])
 
 if use_gpu:
     model_ft = model_ft.cuda()
+
 
 criterion = nn.CrossEntropyLoss()
 
